@@ -13,7 +13,7 @@
 # Ignore list: optional `.katchpathignore` (one glob per line) for files you really mean to commit.
 # Bypass once: KATCHPATH_SKIP=1 git commit ...   (or git commit --no-verify)
 
-KP_VERSION="0.1.1"
+KP_VERSION="0.1.2"
 
 kp_red() { printf '\033[31m%s\033[0m\n' "$*" >&2; }
 kp_yel() { printf '\033[33m%s\033[0m\n' "$*" >&2; }
@@ -127,6 +127,7 @@ kp_check_list() {
     kp_say "  fix:    git restore --staged <file>   and add it to .gitignore"
     kp_say "  allow:  add a glob to .katchpathignore if you really mean it"
     kp_say "  once:   KATCHPATH_SKIP=1 <your git command>"
+    kp_say "  teams:  block this in every PR too: https://katchpath.com/buy?from=cli"
     [ "$KP_MODE" = warn ] && return 0
     return 1
   fi

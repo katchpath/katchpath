@@ -50,7 +50,7 @@ Config: optional `.katchpath` at the repo root (`max_files`, `max_size_kb`, `sca
 
 ## Teams
 
-The [Team Pack](https://katchpath.com/#team) adds a GitHub Action that fails any PR adding a `.env` or key, a policy file and rollout scripts. $19, one-time.
+The [Team Pack](https://katchpath.com/buy?from=readme) adds a GitHub Action that fails any PR adding a `.env` or key, a policy file and rollout scripts. $19, one-time.
 
 ## Licence
 
