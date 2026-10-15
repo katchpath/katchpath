@@ -13,7 +13,7 @@
 # Ignore list: optional `.katchpathignore` (one glob per line) for files you really mean to commit.
 # Bypass once: KATCHPATH_SKIP=1 git commit ...   (or git commit --no-verify)
 
-KP_VERSION="0.1.3"
+KP_VERSION="0.1.4"
 
 kp_red() { printf '\033[31m%s\033[0m\n' "$*" >&2; }
 kp_yel() { printf '\033[33m%s\033[0m\n' "$*" >&2; }
@@ -127,7 +127,7 @@ kp_check_list() {
     kp_say "  fix:    git restore --staged <file>   and add it to .gitignore"
     kp_say "  allow:  add a glob to .katchpathignore if you really mean it"
     kp_say "  once:   KATCHPATH_SKIP=1 <your git command>"
-    kp_say "  teams:  block this in every PR too: https://katchpath.com/buy?from=cli"
+    kp_say "  teams:  block this in every PR too: https://katchpath.com/buy?from=cli&src=$(kp_ref)"
     [ "$KP_MODE" = warn ] && return 0
     return 1
   fi
@@ -253,7 +253,11 @@ kp_install() {
   kp_say "next: add the add-guard to your shell:  echo 'eval \"\$(katchpath shell)\"' >> ~/.bashrc   (or ~/.zshrc)"
 }
 
+# install source for site links: npm (bin symlinks into node_modules, or npx) vs curl installer
+kp_ref() { case "$0 $(ls -l "$0" 2>/dev/null)" in *node_modules*) echo npm ;; *) echo cli ;; esac; }
+
 kp_help() {
+  echo "KatchPath $KP_VERSION  ·  free tools + fix guides: https://katchpath.com/?src=$(kp_ref)"
   sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
   cat <<'H'
 
@@ -271,7 +275,7 @@ case "${1:-help}" in
   add-check) shift; kp_add_check "$@" ;;
   install) shift; kp_install "$@" ;;
   shell) kp_shell ;;
-  version|--version|-v) echo "katchpath $KP_VERSION" ;;
+  version|--version|-v) echo "katchpath $KP_VERSION"; echo "https://katchpath.com/?src=$(kp_ref)" ;;
   help|--help|-h) kp_help ;;
   *) kp_help; exit 1 ;;
 esac

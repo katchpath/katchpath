@@ -37,20 +37,20 @@ Config: optional `.katchpath` at the repo root (`max_files`, `max_size_kb`, `sca
 
 ## Free tools (in your browser)
 
-- [API key scanner](https://katchpath.com/tools/api-key-scanner?ref=gh): paste code or a diff, find leaked keys. Nothing is sent.
-- [.env / .git exposure check](https://katchpath.com/tools/env-exposure-check?ref=gh): is your live site serving `/.env` or `/.git/config`?
-- [.gitignore tester](https://katchpath.com/tools/gitignore-tester?ref=gh): which paths git ignores, and which rule decides.
+- [API key scanner](https://katchpath.com/tools/api-key-scanner?src=gh): paste code or a diff, find leaked keys. Nothing is sent.
+- [.env / .git exposure check](https://katchpath.com/tools/env-exposure-check?src=gh): is your live site serving `/.env` or `/.git/config`?
+- [.gitignore tester](https://katchpath.com/tools/gitignore-tester?src=gh): which paths git ignores, and which rule decides.
 
 ## Already leaked something?
 
-- [Committed a .env file to GitHub](https://katchpath.com/fix/committed-env-file-to-github?ref=gh): rotate first, then clean history.
-- [GitHub push protection: secret detected](https://katchpath.com/fix/github-push-protection-secret-detected?ref=gh)
-- [Prevent committing .env files](https://katchpath.com/fix/prevent-committing-env-file?ref=gh)
-- [Undo git add](https://katchpath.com/fix/undo-git-add?ref=gh) · [Remove node_modules from git](https://katchpath.com/fix/remove-node-modules-from-git?ref=gh) · [.gitignore not working](https://katchpath.com/fix/gitignore-not-working?ref=gh)
+- [Committed a .env file to GitHub](https://katchpath.com/fix/committed-env-file-to-github?src=gh): rotate first, then clean history.
+- [GitHub push protection: secret detected](https://katchpath.com/fix/github-push-protection-secret-detected?src=gh)
+- [Prevent committing .env files](https://katchpath.com/fix/prevent-committing-env-file?src=gh)
+- [Undo git add](https://katchpath.com/fix/undo-git-add?src=gh) · [Remove node_modules from git](https://katchpath.com/fix/remove-node-modules-from-git?src=gh) · [.gitignore not working](https://katchpath.com/fix/gitignore-not-working?src=gh)
 
 ## Teams
 
-The [Team Pack](https://katchpath.com/buy?from=readme&ref=gh) adds a GitHub Action that fails any PR adding a `.env` or key, a policy file and rollout scripts. $19, one-time.
+The [Team Pack](https://katchpath.com/buy?from=readme&src=gh) adds a GitHub Action that fails any PR adding a `.env` or key, a policy file and rollout scripts. $19, one-time.
 
 ## Licence
 
