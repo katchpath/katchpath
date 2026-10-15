@@ -1,0 +1,276 @@
+#!/bin/sh
+# KatchPath - stop secrets, keys and build folders before they get staged or committed.
+# https://katchpath.com  ·  MIT licence  ·  POSIX sh + git, no other dependencies.
+#
+#   katchpath install            install the pre-commit hook in this repo
+#   katchpath install --global   install for every repo (git core.hooksPath)
+#   katchpath shell              print the shell function that guards `git add -A/./--all`
+#   katchpath scan [paths...]    check staged files (or the given paths)
+#   katchpath add-check <args>   dry-run a `git add` and check what it would stage
+#   katchpath version
+#
+# Config: optional `.katchpath` file at the repo root (key=value, see `katchpath help`).
+# Ignore list: optional `.katchpathignore` (one glob per line) for files you really mean to commit.
+# Bypass once: KATCHPATH_SKIP=1 git commit ...   (or git commit --no-verify)
+
+KP_VERSION="0.1.1"
+
+kp_red() { printf '\033[31m%s\033[0m\n' "$*" >&2; }
+kp_yel() { printf '\033[33m%s\033[0m\n' "$*" >&2; }
+kp_say() { printf '%s\n' "$*" >&2; }
+
+kp_root() { git rev-parse --show-toplevel 2>/dev/null; }
+
+# ---- config -----------------------------------------------------------------
+kp_load_config() {
+  KP_MAX_FILES=300          # a single add/commit staging more files than this is "blanket"
+  KP_MAX_SIZE_KB=5120       # files bigger than this are flagged (5 MB)
+  KP_SCAN_CONTENT=1         # grep staged content for key-shaped strings
+  KP_ALLOW_ROOTS=""         # extra dirs (relative to repo root) where blanket adds are OK
+  KP_MODE=block             # block | warn
+  _root=$(kp_root)
+  if [ -n "$_root" ] && [ -f "$_root/.katchpath" ]; then
+    while IFS='=' read -r k v; do
+      case "$k" in
+        ''|\#*) continue ;;
+        max_files) KP_MAX_FILES=$v ;;
+        max_size_kb) KP_MAX_SIZE_KB=$v ;;
+        scan_content) KP_SCAN_CONTENT=$v ;;
+        allow_roots) KP_ALLOW_ROOTS=$v ;;
+        mode) KP_MODE=$v ;;
+      esac
+    done < "$_root/.katchpath"
+  fi
+  # env overrides (CI, one-off runs)
+  [ -n "${KATCHPATH_MODE:-}" ] && KP_MODE=$KATCHPATH_MODE
+  [ -n "${KATCHPATH_MAX_FILES:-}" ] && KP_MAX_FILES=$KATCHPATH_MAX_FILES
+  return 0
+}
+
+# ---- rules ------------------------------------------------------------------
+# Secret-shaped file names (matched against the basename, case-insensitive).
+kp_secret_name() {
+  b=$(basename "$1" | tr 'A-Z' 'a-z')
+  case "$b" in
+    .env.example|.env.sample|.env.template|.env.dist|.env.defaults|example.env|sample.env) return 1 ;;
+    .env|.env.*|*.env) return 0 ;;
+    *.pem|*.key|*.p12|*.pfx|*.jks|*.keystore|*.ppk|*.kdbx|*.ovpn) return 0 ;;
+    id_rsa|id_rsa.*|id_dsa|id_ecdsa|id_ed25519|id_ed25519_sk) return 0 ;;
+    credentials|credentials.json|client_secret*.json|service-account*.json|serviceaccount*.json) return 0 ;;
+    .npmrc|.pypirc|.netrc|.htpasswd|.pgpass|.git-credentials|.dockercfg) return 0 ;;
+    terraform.tfstate|terraform.tfstate.backup|*.tfvars|secrets.yml|secrets.yaml|secret.yml|secret.yaml) return 0 ;;
+  esac
+  case "$1" in
+    .aws/*|*/.aws/*|.ssh/*|*/.ssh/*|.gnupg/*|*/.gnupg/*) return 0 ;;
+  esac
+  return 1
+}
+
+# Build / dependency folders that should never be in a commit.
+kp_build_dir() {
+  case "/$1" in
+    */node_modules/*|*/.venv/*|*/venv/*|*/__pycache__/*|*/.pytest_cache/*|*/.mypy_cache/*|\
+    */.next/*|*/.nuxt/*|*/.svelte-kit/*|*/.turbo/*|*/.parcel-cache/*|*/.gradle/*|\
+    */target/debug/*|*/target/release/*|*/.terraform/*|*/.idea/*|*/.DS_Store|*/Thumbs.db) return 0 ;;
+  esac
+  return 1
+}
+
+# Key-shaped content (extended regex). Kept conservative to avoid noise.
+KP_CONTENT_RE='-----BEGIN ([A-Z]+ )?PRIVATE KEY-----|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{40,}|glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]{10,}|sk_live_[A-Za-z0-9]{20,}|rk_live_[A-Za-z0-9]{20,}|AIza[0-9A-Za-z_-]{35}|sk-ant-[A-Za-z0-9_-]{20,}|sk-proj-[A-Za-z0-9_-]{20,}|npm_[A-Za-z0-9]{36}|SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}'
+
+kp_ignored() {
+  _root=$(kp_root); [ -f "$_root/.katchpathignore" ] || return 1
+  while IFS= read -r pat; do
+    case "$pat" in ''|\#*) continue ;; esac
+    # shellcheck disable=SC2254
+    case "$1" in $pat) return 0 ;; esac
+  done < "$_root/.katchpathignore"
+  return 1
+}
+
+# Check a newline-separated list of paths (relative to repo root) on stdin.
+# $1 = "staged" to read content from the index, "worktree" to read files on disk.
+kp_check_list() {
+  src=$1; problems=0; count=0; tmp=$(mktemp); root=$(kp_root)
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    count=$((count + 1))
+    kp_ignored "$f" && continue
+    if kp_secret_name "$f"; then echo "secret-file  $f" >> "$tmp"; problems=$((problems + 1)); continue; fi
+    if kp_build_dir "$f"; then echo "build-dir    $f" >> "$tmp"; problems=$((problems + 1)); continue; fi
+    if [ "$src" = staged ]; then
+      sz=$(git cat-file -s ":$f" 2>/dev/null || echo 0)
+    else
+      sz=$(wc -c < "$root/$f" 2>/dev/null | tr -d ' ' || echo 0)
+    fi
+    [ -n "$sz" ] || sz=0
+    if [ "$sz" -gt $((KP_MAX_SIZE_KB * 1024)) ]; then
+      echo "large-file   $f ($((sz / 1024)) KB)" >> "$tmp"; problems=$((problems + 1)); continue
+    fi
+    if [ "$KP_SCAN_CONTENT" = 1 ] && [ "$sz" -gt 0 ] && [ "$sz" -lt 2097152 ]; then
+      if [ "$src" = staged ]; then
+        git show ":$f" 2>/dev/null | grep -Eq -- "$KP_CONTENT_RE" && { echo "key-in-file  $f" >> "$tmp"; problems=$((problems + 1)); }
+      else
+        [ -f "$root/$f" ] && grep -Eq -- "$KP_CONTENT_RE" "$root/$f" 2>/dev/null && { echo "key-in-file  $f" >> "$tmp"; problems=$((problems + 1)); }
+      fi
+    fi
+  done
+  if [ "$count" -gt "$KP_MAX_FILES" ]; then
+    echo "blanket-add  $count files at once (limit $KP_MAX_FILES, set max_files in .katchpath)" >> "$tmp"; problems=$((problems + 1))
+  fi
+  if [ "$problems" -gt 0 ]; then
+    if [ "$KP_MODE" = warn ]; then kp_yel "katchpath: $problems warning(s):"; else kp_red "katchpath: blocked, $problems problem(s):"; fi
+    sed 's/^/  /' "$tmp" >&2
+    rm -f "$tmp"
+    kp_say ""
+    kp_say "  fix:    git restore --staged <file>   and add it to .gitignore"
+    kp_say "  allow:  add a glob to .katchpathignore if you really mean it"
+    kp_say "  once:   KATCHPATH_SKIP=1 <your git command>"
+    [ "$KP_MODE" = warn ] && return 0
+    return 1
+  fi
+  rm -f "$tmp"; return 0
+}
+
+# ---- commands ---------------------------------------------------------------
+kp_scan() {
+  [ "${KATCHPATH_SKIP:-0}" = 1 ] && exit 0
+  kp_load_config
+  if [ $# -gt 0 ]; then
+    root=$(kp_root)
+    for p in "$@"; do git -C "$root" -c core.quotePath=false --literal-pathspecs ls-files --others --cached --exclude-standard -- "$p"; done | sort -u | kp_check_list worktree
+  else
+    git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMR | kp_check_list staged
+  fi
+}
+
+# Called by the shell wrapper before a real `git add`.
+kp_add_check() {
+  [ "${KATCHPATH_SKIP:-0}" = 1 ] && exit 0
+  blanket=0
+  for a in "$@"; do
+    case "$a" in -A|--all|.|./|:/|'*'|-u|--update) blanket=1 ;; esac
+  done
+  [ "$blanket" = 1 ] || exit 0
+  root=$(kp_root) || exit 0
+  [ -n "$root" ] || exit 0
+  kp_load_config
+  here=$(pwd -P); rootp=$(cd "$root" && pwd -P)
+  if [ "$here" != "$rootp" ]; then
+    rel=${here#"$rootp"/}; ok=0
+    for r in $(printf '%s' "$KP_ALLOW_ROOTS" | tr ',' ' '); do
+      case "$rel" in "$r"|"$r"/*) ok=1 ;; esac
+    done
+    if [ "$ok" = 0 ]; then
+      kp_yel "katchpath: blanket add from a subfolder ($rel), not the repo root."
+      kp_yel "  that is how half a home directory ends up in a repo. allow it with allow_roots=$rel in .katchpath"
+      [ "$KP_MODE" = warn ] || exit 1
+    fi
+  fi
+  case "$here/" in "$HOME/"|"/") kp_red "katchpath: refusing a blanket add from $here"; exit 1 ;; esac
+  # what would this add actually stage? (paths only, nothing is changed)
+  git -c core.quotePath=false add --dry-run "$@" 2>/dev/null | sed -n "s/^add '\(.*\)'$/\1/p" | kp_check_list worktree
+}
+
+kp_shell() {
+  cat <<'SH'
+# katchpath: guard blanket `git add` (paste into ~/.bashrc or ~/.zshrc, or: eval "$(katchpath shell)")
+git() {
+  if [ "$1" = add ] && command -v katchpath >/dev/null 2>&1; then
+    shift
+    katchpath add-check "$@" || return 1
+    command git add "$@"
+  else
+    command git "$@"
+  fi
+}
+SH
+}
+
+kp_self() {
+  p=$(command -v katchpath 2>/dev/null || true)
+  [ -n "$p" ] || p=$0
+  case "$p" in /*) ;; *) p="$(pwd -P)/$p" ;; esac
+  printf '%s' "$p"
+}
+
+# $1 = hook to chain after the scan (optional), $2 = "global" for the core.hooksPath hook
+kp_hook_body() {
+  printf '#!/bin/sh\n# installed by katchpath (https://katchpath.com)\nKP_BIN="%s"\n' "$(kp_self)"
+  cat <<'HOOK'
+if [ "${KATCHPATH_CHAINED:-0}" != 1 ]; then
+  if command -v katchpath >/dev/null 2>&1; then katchpath scan || exit 1
+  elif [ -x "$KP_BIN" ]; then "$KP_BIN" scan || exit 1
+  else echo "katchpath: binary not found, commit NOT checked (reinstall katchpath)" >&2
+  fi
+fi
+HOOK
+  if [ "${2:-}" = global ]; then
+    if [ -n "${1:-}" ]; then printf 'if [ -x "%s" ]; then "%s" "$@" || exit 1; fi\n' "$1" "$1"; fi
+    cat <<'HOOK'
+# a global hooksPath shadows .git/hooks: run the repo's own pre-commit too
+local_hook="$(git rev-parse --git-dir)/hooks/pre-commit"
+if [ -x "$local_hook" ]; then KATCHPATH_CHAINED=1 exec "$local_hook" "$@"; fi
+HOOK
+  elif [ -n "${1:-}" ]; then
+    printf 'if [ -x "%s" ]; then exec "%s" "$@"; fi\n' "$1" "$1"
+  fi
+  echo "exit 0"
+}
+
+kp_install() {
+  if [ "${1:-}" = --global ]; then
+    mkdir -p "$HOME/.katchpath/hooks"
+    prev=$(git config --global --get core.hooksPath || true)
+    chain=""
+    if [ -n "$prev" ] && [ "$prev" != "$HOME/.katchpath/hooks" ] && [ -x "$prev/pre-commit" ]; then
+      cp "$prev/pre-commit" "$HOME/.katchpath/hooks/pre-commit.previous"
+      chain="$HOME/.katchpath/hooks/pre-commit.previous"
+      kp_say "katchpath: previous global hook ($prev) kept and chained."
+    elif [ -x "$HOME/.katchpath/hooks/pre-commit.previous" ]; then
+      chain="$HOME/.katchpath/hooks/pre-commit.previous"
+    fi
+    kp_hook_body "$chain" global > "$HOME/.katchpath/hooks/pre-commit"
+    chmod +x "$HOME/.katchpath/hooks/pre-commit"
+    git config --global core.hooksPath "$HOME/.katchpath/hooks"
+    kp_say "katchpath: global pre-commit hook installed (core.hooksPath=$HOME/.katchpath/hooks)."
+  else
+    gd=$(git rev-parse --git-dir 2>/dev/null) || { kp_red "not inside a git repo (use --global for all repos)"; exit 1; }
+    gd=$(cd "$gd" && pwd -P); mkdir -p "$gd/hooks"
+    hook="$gd/hooks/pre-commit"
+    if [ -f "$hook" ] && ! grep -q katchpath "$hook"; then
+      mv "$hook" "$hook.pre-katchpath"
+      kp_say "katchpath: existing hook kept as $hook.pre-katchpath and chained."
+      kp_hook_body "$hook.pre-katchpath" > "$hook"
+    else
+      kp_hook_body > "$hook"
+    fi
+    chmod +x "$hook"
+    kp_say "katchpath: pre-commit hook installed in $(kp_root)."
+  fi
+  kp_say "next: add the add-guard to your shell:  echo 'eval \"\$(katchpath shell)\"' >> ~/.bashrc   (or ~/.zshrc)"
+}
+
+kp_help() {
+  sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
+  cat <<'H'
+
+.katchpath (repo root, all optional):
+  max_files=300        blanket-add threshold
+  max_size_kb=5120     large-file threshold
+  scan_content=1       look for key-shaped strings in staged files
+  allow_roots=docs,web comma list of subfolders where `git add .` is fine
+  mode=block           or warn
+H
+}
+
+case "${1:-help}" in
+  scan) shift; kp_scan "$@" ;;
+  add-check) shift; kp_add_check "$@" ;;
+  install) shift; kp_install "$@" ;;
+  shell) kp_shell ;;
+  version|--version|-v) echo "katchpath $KP_VERSION" ;;
+  help|--help|-h) kp_help ;;
+  *) kp_help; exit 1 ;;
+esac

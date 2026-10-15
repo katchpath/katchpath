@@ -1,0 +1,42 @@
+{
+  "name": "katchpath",
+  "version": "0.1.1",
+  "description": "Tiny git guard: blocks .env files, private keys, key-shaped strings and node_modules before git add / git commit. One POSIX shell file, no dependencies.",
+  "bin": {
+    "katchpath": "katchpath"
+  },
+  "files": [
+    "katchpath",
+    "README.md",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "homepage": "https://katchpath.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/katchpath/katchpath.git"
+  },
+  "bugs": {
+    "url": "https://github.com/katchpath/katchpath/issues"
+  },
+  "keywords": [
+    "git",
+    "pre-commit",
+    "git-hooks",
+    "secrets",
+    "secret-scanning",
+    "dotenv",
+    "env",
+    "api-keys",
+    "security",
+    "gitignore",
+    "devsecops",
+    "cli"
+  ],
+  "os": [
+    "darwin",
+    "linux",
+    "freebsd",
+    "openbsd"
+  ]
+}
