@@ -1,0 +1,8 @@
+- id: katchpath
+  name: katchpath (block secrets, keys, build folders)
+  description: Stops .env files, private keys, credentials and build/dependency folders from being committed.
+  entry: katchpath scan
+  language: script
+  pass_filenames: false
+  always_run: true
+  stages: [pre-commit]

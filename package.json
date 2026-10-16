@@ -1,6 +1,6 @@
 {
   "name": "katchpath",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Tiny git guard: blocks .env files, private keys, key-shaped strings and node_modules before git add / git commit. One POSIX shell file, no dependencies.",
   "bin": {
     "katchpath": "katchpath"

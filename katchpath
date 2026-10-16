@@ -13,7 +13,7 @@
 # Ignore list: optional `.katchpathignore` (one glob per line) for files you really mean to commit.
 # Bypass once: KATCHPATH_SKIP=1 git commit ...   (or git commit --no-verify)
 
-KP_VERSION="0.1.4"
+KP_VERSION="0.1.5"
 
 kp_red() { printf '\033[31m%s\033[0m\n' "$*" >&2; }
 kp_yel() { printf '\033[33m%s\033[0m\n' "$*" >&2; }
@@ -254,7 +254,7 @@ kp_install() {
 }
 
 # install source for site links: npm (bin symlinks into node_modules, or npx) vs curl installer
-kp_ref() { case "$0 $(ls -l "$0" 2>/dev/null)" in *node_modules*) echo npm ;; *) echo cli ;; esac; }
+kp_ref() { [ "${PRE_COMMIT:-}" = 1 ] && { echo precommit; return; }; case "$0 $(ls -l "$0" 2>/dev/null)" in *pre-commit*) echo precommit ;; *node_modules*) echo npm ;; *) echo cli ;; esac; }
 
 kp_help() {
   echo "KatchPath $KP_VERSION  ·  free tools + fix guides: https://katchpath.com/?src=$(kp_ref)"

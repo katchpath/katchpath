@@ -22,6 +22,16 @@ katchpath install --global                     # or every repo (core.hooksPath)
 echo 'eval "$(katchpath shell)"' >> ~/.zshrc   # guards git add -A / . / --all
 ```
 
+Using the [pre-commit](https://pre-commit.com) framework? Add to `.pre-commit-config.yaml`:
+
+```yaml
+repos:
+  - repo: https://github.com/katchpath/katchpath
+    rev: v0.1.5
+    hooks:
+      - id: katchpath
+```
+
 ## Commands
 
 ```
